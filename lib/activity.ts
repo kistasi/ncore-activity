@@ -1,8 +1,8 @@
 import { getAliases } from './aliases-db'
 import { getHitAndRun, login, NcoreError } from './ncore'
 import { matchTorrent } from './torrent-matcher'
-import { getTorrents, TransmissionError } from './transmission'
-import type { ActivityResponse, TransmissionTorrent } from './types'
+import { getInstances, getTorrents, TransmissionError } from './transmission'
+import type { ActivityResponse, TransmissionTorrent, TxInstance } from './types'
 
 /**
  * Join nCore's hit-and-run list with Transmission's torrents, so seeding
@@ -43,6 +43,7 @@ export async function getActivity(): Promise<ActivityResponse> {
   const unmatched = torrents
     .filter((t) => !matchedIds.has(t.id))
     .map((t) => ({
+      instance: t.instance,
       id: t.id,
       name: t.name,
       txStatus: t.status,
@@ -54,13 +55,23 @@ export async function getActivity(): Promise<ActivityResponse> {
 }
 
 // The hit-and-run list is still worth showing when Transmission is down; every
-// entry just comes back unmatched.
+// entry just comes back unmatched. Each daemon is asked on its own, since the
+// external one is only up while its drive is plugged in.
 async function getTorrentsOrNone(): Promise<TransmissionTorrent[]> {
+  let instances
   try {
-    return await getTorrents()
+    instances = getInstances()
   } catch (err) {
-    if (!(err instanceof TransmissionError)) throw err
-    console.warn(`Failed to fetch Transmission torrents: ${err.message}`)
-    return []
+    return warnAndSkip(err, 'main')
   }
+  const lists = await Promise.all(
+    instances.map((i) => getTorrents(i).catch((err) => warnAndSkip(err, i.name)))
+  )
+  return lists.flat()
+}
+
+function warnAndSkip(err: unknown, instance: TxInstance): TransmissionTorrent[] {
+  if (!(err instanceof TransmissionError)) throw err
+  console.warn(`Failed to fetch torrents from the ${instance} Transmission: ${err.message}`)
+  return []
 }

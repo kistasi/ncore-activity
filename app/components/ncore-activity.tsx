@@ -6,6 +6,7 @@ import { entryStatus, statusInfo } from '@/lib/format'
 import Alert from '@mui/material/Alert'
 import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
+import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Container from '@mui/material/Container'
 import IconButton from '@mui/material/IconButton'
@@ -28,6 +29,17 @@ import LinkIcon from '@mui/icons-material/Link'
 
 // Collapse a column to its content, for the narrow status/number columns.
 const narrow = { width: '1px', whiteSpace: 'nowrap' } as const
+
+// Torrent ids are only unique within one Transmission daemon.
+const keyOf = (t: UnmatchedTorrent) => `${t.instance}:${t.id}`
+
+function removalPrompt(torrents: UnmatchedTorrent[]): string {
+  const subject = torrents.length === 1 ? 'torrent' : `${torrents.length} torrent(s)`
+  const kept = torrents.filter((t) => t.instance === 'external').length
+  if (kept === 0) return `Remove ${subject} from Transmission?`
+  if (kept === torrents.length) return `Remove ${subject} from Transmission? Files on the external drive are kept.`
+  return `Remove ${subject} from Transmission? Files of the ${kept} on the external drive are kept.`
+}
 
 async function send(url: string, method: string, body?: unknown): Promise<void> {
   const res = await fetch(url, {
@@ -53,8 +65,8 @@ export default function NcoreActivity() {
   const [error, setError] = useState<string | null>(null)
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const [unmatched, setUnmatched] = useState<UnmatchedTorrent[]>([])
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [removing, setRemoving] = useState<Set<number>>(new Set())
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [removing, setRemoving] = useState<Set<string>>(new Set())
 
   const showActivity = useCallback((activity: ActivityResponse) => {
     setEntries(activity.entries)
@@ -92,22 +104,21 @@ export default function NcoreActivity() {
     }
   }
 
-  const removeTorrents = async (ids: number[]) => {
-    const prompt =
-      ids.length === 1
-        ? 'Remove torrent from Transmission?'
-        : `Remove ${ids.length} torrent(s) from Transmission?`
-    if (ids.length === 0 || !window.confirm(prompt)) return
+  const removeTorrents = async (torrents: UnmatchedTorrent[]) => {
+    if (torrents.length === 0 || !window.confirm(removalPrompt(torrents))) return
 
-    setRemoving((r) => new Set([...r, ...ids]))
+    const keys = torrents.map(keyOf)
+    setRemoving((r) => new Set([...r, ...keys]))
     try {
-      await send('/api/torrents', 'DELETE', { ids })
-      setUnmatched((u) => u.filter((t) => !ids.includes(t.id)))
-      setSelected((s) => new Set([...s].filter((id) => !ids.includes(id))))
+      await send('/api/torrents', 'DELETE', {
+        torrents: torrents.map((t) => ({ instance: t.instance, id: t.id })),
+      })
+      setUnmatched((u) => u.filter((t) => !keys.includes(keyOf(t))))
+      setSelected((s) => new Set([...s].filter((key) => !keys.includes(key))))
     } catch (err) {
       window.alert((err as Error).message)
     } finally {
-      setRemoving((r) => new Set([...r].filter((id) => !ids.includes(id))))
+      setRemoving((r) => new Set([...r].filter((key) => !keys.includes(key))))
     }
   }
 
@@ -131,21 +142,21 @@ export default function NcoreActivity() {
     }
   }
 
-  const toggleSelect = (id: number) => {
+  const toggleSelect = (key: string) => {
     setSelected((s) => {
       const next = new Set(s)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
   const allSelected = unmatched.length > 0 && selected.size === unmatched.length
   const toggleSelectAll = () => {
-    setSelected(allSelected ? new Set() : new Set(unmatched.map((t) => t.id)))
+    setSelected(allSelected ? new Set() : new Set(unmatched.map(keyOf)))
   }
 
-  const bulkRemoving = selected.size > 0 && [...selected].every((id) => removing.has(id))
+  const bulkRemoving = selected.size > 0 && [...selected].every((key) => removing.has(key))
 
   return (
     <Container maxWidth="lg" sx={{ py: { xs: 3, sm: 4 } }}>
@@ -221,7 +232,7 @@ export default function NcoreActivity() {
                             >
                               <MenuItem value="">—</MenuItem>
                               {unmatched.map((t) => (
-                                <MenuItem key={t.id} value={t.name}>
+                                <MenuItem key={keyOf(t)} value={t.name}>
                                   {t.name}
                                 </MenuItem>
                               ))}
@@ -247,7 +258,7 @@ export default function NcoreActivity() {
                 color="error"
                 disabled={bulkRemoving}
                 startIcon={bulkRemoving ? <CircularProgress size={14} color="inherit" /> : <DeleteIcon />}
-                onClick={() => removeTorrents([...selected])}
+                onClick={() => removeTorrents(unmatched.filter((t) => selected.has(keyOf(t))))}
               >
                 {bulkRemoving ? 'Deleting…' : `Delete selected (${selected.size})`}
               </Button>
@@ -279,18 +290,26 @@ export default function NcoreActivity() {
                 <TableBody>
                   {unmatched.map((t, i) => {
                     const status = statusInfo(t.txStatus)
+                    const key = keyOf(t)
                     return (
-                      <TableRow key={t.id} hover selected={selected.has(t.id)}>
+                      <TableRow key={key} hover selected={selected.has(key)}>
                         <TableCell padding="checkbox">
                           <Checkbox
                             size="small"
-                            checked={selected.has(t.id)}
-                            onChange={() => toggleSelect(t.id)}
+                            checked={selected.has(key)}
+                            onChange={() => toggleSelect(key)}
                             slotProps={{ input: { 'aria-label': `Select ${t.name}` } }}
                           />
                         </TableCell>
                         <TableCell sx={{ ...narrow, color: 'text.disabled' }}>{i + 1}</TableCell>
-                        <TableCell sx={{ wordBreak: 'break-word' }}>{t.name}</TableCell>
+                        <TableCell sx={{ wordBreak: 'break-word' }}>
+                          {t.name}
+                          {t.instance === 'external' && (
+                            <Tooltip title="On the external drive; removing keeps the files">
+                              <Chip label="external" size="small" variant="outlined" sx={{ ml: 1 }} />
+                            </Tooltip>
+                          )}
+                        </TableCell>
                         <TableCell sx={{ ...narrow, color: status.tone }}>{status.label}</TableCell>
                         <TableCell sx={narrow}>
                           <Tooltip title="Remove">
@@ -298,8 +317,8 @@ export default function NcoreActivity() {
                               <IconButton
                                 size="small"
                                 aria-label={`Remove ${t.name}`}
-                                disabled={removing.has(t.id)}
-                                onClick={() => removeTorrents([t.id])}
+                                disabled={removing.has(key)}
+                                onClick={() => removeTorrents([t])}
                               >
                                 <CloseIcon fontSize="small" />
                               </IconButton>

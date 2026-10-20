@@ -22,17 +22,24 @@ beforeEach(() => {
 
 describe('DELETE /api/torrents', () => {
   it('removes the given torrents', async () => {
-    const res = await DELETE(deleteRequest({ ids: [1, 2] }))
+    const torrents = [
+      { instance: 'main', id: 1 },
+      { instance: 'external', id: 1 },
+    ]
+    const res = await DELETE(deleteRequest({ torrents }))
     expect(res.status).toBe(200)
-    expect(mockRemove).toHaveBeenCalledWith([1, 2])
+    expect(mockRemove).toHaveBeenCalledWith(torrents)
   })
 
   it.each([
     ['no body', 'not json'],
-    ['no ids', {}],
-    ['an empty list', { ids: [] }],
-    ['a non-positive id', { ids: [1, 0] }],
-    ['a non-integer id', { ids: ['1'] }],
+    ['no torrents', {}],
+    ['an empty list', { torrents: [] }],
+    ['a bare id', { torrents: [1] }],
+    ['a non-positive id', { torrents: [{ instance: 'main', id: 0 }] }],
+    ['a non-integer id', { torrents: [{ instance: 'main', id: '1' }] }],
+    ['an unknown instance', { torrents: [{ instance: 'other', id: 1 }] }],
+    ['a missing instance', { torrents: [{ id: 1 }] }],
   ])('rejects %s without touching Transmission', async (_label, body) => {
     const res = await DELETE(deleteRequest(body))
     expect(res.status).toBe(400)
@@ -41,7 +48,7 @@ describe('DELETE /api/torrents', () => {
 
   it('passes on a Transmission failure', async () => {
     mockRemove.mockRejectedValue(new TransmissionError('Transmission RPC returned HTTP 401.'))
-    const res = await DELETE(deleteRequest({ ids: [1] }))
+    const res = await DELETE(deleteRequest({ torrents: [{ instance: 'main', id: 1 }] }))
     expect(res.status).toBe(502)
     expect(await res.json()).toEqual({ error: 'Transmission RPC returned HTTP 401.' })
   })

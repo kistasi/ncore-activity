@@ -13,12 +13,18 @@ The page shows two tables:
 - **In Transmission only**: torrents no entry matched, which can be removed
   (along with their data) one by one or in bulk.
 
+A second, external Transmission can be added for downloads that live on a drive
+outside the media library. Its torrents are matched the same way and tagged
+*external*, and removing one never deletes its files: there is no hardlink in
+the library behind them, so they are the only copy.
+
 ## Configuration
 
 | Variable | |
 | --- | --- |
 | `NCORE_USERNAME`, `NCORE_PASSWORD` | nCore login |
 | `TRANSMISSION_RPC_URL` | e.g. `http://transmission:9091/transmission/rpc` |
+| `TRANSMISSION_EXTERNAL_RPC_URL` | optional, e.g. `http://transmission-mom:9091/transmission/rpc`; removing its torrents keeps their data |
 
 Aliases are stored in `data/aliases.json`; mount a volume at `/app/data` to keep
 them.

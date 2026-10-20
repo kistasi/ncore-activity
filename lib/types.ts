@@ -8,8 +8,21 @@ export type HitAndRunEntry = {
   link: string
 }
 
+/**
+ * Which Transmission daemon a torrent lives in: the main one, or the optional
+ * external one whose downloads are kept when a torrent is removed.
+ */
+export type TxInstance = 'main' | 'external'
+
+/** Identifies a torrent; ids are only unique within one daemon. */
+export type TorrentRef = {
+  instance: TxInstance
+  id: number
+}
+
 /** The subset of Transmission's torrent-get fields this app asks for. */
 export type TransmissionTorrent = {
+  instance: TxInstance
   id: number
   name: string
   status: number
@@ -36,6 +49,7 @@ export type ActivityEntry = HitAndRunEntry & {
 
 /** A Transmission torrent no hit-and-run entry matched. */
 export type UnmatchedTorrent = {
+  instance: TxInstance
   id: number
   name: string
   txStatus: number

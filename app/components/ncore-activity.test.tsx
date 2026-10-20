@@ -35,8 +35,10 @@ const activity: ActivityResponse = {
     },
   ],
   unmatched: [
-    { id: 10, name: 'Eraserhead.1977', txStatus: 6, txUpload: 0, txDownload: 0 },
-    { id: 11, name: 'Leftover', txStatus: 0, txUpload: 0, txDownload: 0 },
+    { instance: 'main', id: 10, name: 'Eraserhead.1977', txStatus: 6, txUpload: 0, txDownload: 0 },
+    { instance: 'main', id: 11, name: 'Leftover', txStatus: 0, txUpload: 0, txDownload: 0 },
+    // Same id as a main torrent: ids are only unique within one daemon.
+    { instance: 'external', id: 11, name: 'For Mom', txStatus: 6, txUpload: 0, txDownload: 0 },
   ],
 }
 
@@ -88,7 +90,30 @@ describe('NcoreActivity', () => {
     await user.click(screen.getByRole('button', { name: 'Remove Leftover' }))
 
     await waitFor(() => expect(screen.queryByText('Leftover')).not.toBeInTheDocument())
-    expect(JSON.parse(String(calls('DELETE')[0][1]?.body))).toEqual({ ids: [11] })
+    expect(JSON.parse(String(calls('DELETE')[0][1]?.body))).toEqual({
+      torrents: [{ instance: 'main', id: 11 }],
+    })
+    expect(window.confirm).toHaveBeenCalledWith('Remove torrent from Transmission?')
+    expect(screen.getByText('For Mom')).toBeInTheDocument()
+  })
+
+  it('says the files are kept when removing an external torrent', async () => {
+    const user = userEvent.setup()
+    render(<NcoreActivity />)
+    await screen.findByText('For Mom')
+    expect(screen.getByText('external')).toBeInTheDocument()
+
+    fetchMock.mockResolvedValueOnce(json({ ok: true }))
+    await user.click(screen.getByRole('button', { name: 'Remove For Mom' }))
+
+    await waitFor(() => expect(screen.queryByText('For Mom')).not.toBeInTheDocument())
+    expect(window.confirm).toHaveBeenCalledWith(
+      'Remove torrent from Transmission? Files on the external drive are kept.'
+    )
+    expect(JSON.parse(String(calls('DELETE')[0][1]?.body))).toEqual({
+      torrents: [{ instance: 'external', id: 11 }],
+    })
+    expect(screen.getByText('Leftover')).toBeInTheDocument()
   })
 
   it('keeps the torrent when the removal is not confirmed', async () => {
@@ -109,10 +134,19 @@ describe('NcoreActivity', () => {
 
     await user.click(screen.getByRole('checkbox', { name: 'Select all' }))
     fetchMock.mockResolvedValueOnce(json({ ok: true }))
-    await user.click(screen.getByRole('button', { name: 'Delete selected (2)' }))
+    await user.click(screen.getByRole('button', { name: 'Delete selected (3)' }))
 
     expect(await screen.findByText('No unmatched torrents.')).toBeInTheDocument()
-    expect(JSON.parse(String(calls('DELETE')[0][1]?.body))).toEqual({ ids: [10, 11] })
+    expect(window.confirm).toHaveBeenCalledWith(
+      'Remove 3 torrent(s) from Transmission? Files of the 1 on the external drive are kept.'
+    )
+    expect(JSON.parse(String(calls('DELETE')[0][1]?.body))).toEqual({
+      torrents: [
+        { instance: 'main', id: 10 },
+        { instance: 'main', id: 11 },
+        { instance: 'external', id: 11 },
+      ],
+    })
   })
 
   it('links an unmatched entry to a torrent and reloads', async () => {
